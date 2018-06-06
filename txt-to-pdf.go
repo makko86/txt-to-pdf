@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path"
 	"runtime"
 	"strings"
 	"sync"
@@ -34,7 +35,7 @@ const (
 //Flag usages
 const (
 	usageInputFile   = "input file. Optional: Can be omitted to use STDIN as input"
-	usageOutputFile  = "output file Optional: Can be omitted if \"inputFile\" is specified. In this case \"inputFile\".pdf will be used as outputFile"
+	usageOutputFile  = "output file Optional: Can be omitted if \"inputFile\" is specified. In this case \"inputFile.pdf\" will be used as outputFile"
 	usageFontSize    = "Fontsize to use."
 	usagePageSize    = "Page size to use. Possible values: A3, A4, A5, Letter, Legal."
 	usageOrientation = "Page orientation to use. Possible values: L, P"
@@ -140,7 +141,7 @@ func ceatePdfFromFolder(inputPath string, outputPath string) error {
 						if !s.IsDir() {
 							filePair := inOutFilePair{
 								in:  inputPath + s.Name(),
-								out: outputPath + s.Name() + ".pdf",
+								out: parseFileName(outputPath + s.Name()),
 							}
 							c <- filePair
 						}
@@ -216,6 +217,13 @@ func parseInput(r io.Reader) (string, error) {
 	return "", err
 }
 
+func parseFileName(file string) string {
+	if suffix := path.Ext(file); suffix != "" {
+		return strings.TrimSuffix(file, suffix) + ".pdf"
+	}
+	return file + ".pdf"
+}
+
 func main() {
 	defineFlags()
 
@@ -238,7 +246,7 @@ func main() {
 	} else if inputFile != "" {
 		//read from inputfile
 		if outputFile == "" {
-			outputFile = inputFile + ".pdf"
+			outputFile = parseFileName(inputFile)
 		}
 		if err := createPdfFromFile(inputFile, outputFile); err != nil {
 			fmt.Println("Error creating pdf file!", err)
