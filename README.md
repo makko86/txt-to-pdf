@@ -2,10 +2,11 @@
 Tool for converting text files to pdf files.
 
 ## Usage
+Convert "inputFile" to .pdf with a fontsize of 10 points, on a A4 sized page in landscape orientation:
 ```
 txt-to-pdf -if "inputFile" -of "outputFile" -fs 10 -ps a4 -po l
 ```
-Convert "inputFile" to .pdf with a fontsize of 10 points, on a A4 sized page in landscape orientation. Possible parameters:
+Possible parameters:
 * if "inputFile"  - Optional. May be omitted to use STDIN as input.
 * of "outputFile" - Optional. If omitted and "inputFile" is specified "inputFile.pdf" will be used.
 * fs "fontSize"   - Optional. If omitted the default size of 10 will be used. Must be > 0
@@ -16,5 +17,3 @@ Convert "inputFile" to .pdf with a fontsize of 10 points, on a A4 sized page in 
 
 ## Built With
 txt-to-pdf uses [gofpdf](https://github.com/jung-kurt/gofpdf) for all the hard work.
-
-Uses github.com/jung-kurt/gofpdf 

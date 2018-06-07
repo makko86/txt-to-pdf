@@ -20,6 +20,7 @@ var pageSize string
 var orientation string
 var tabSpacing int
 var dirMode bool
+var verboseMode bool
 
 //Flag-defaults
 const (
@@ -30,6 +31,7 @@ const (
 	defaultOrientation = "P"
 	defaultTabSpacing  = 8
 	defaultDirMode     = false
+	defaultVerboseMode = false
 )
 
 //Flag usages
@@ -41,6 +43,7 @@ const (
 	usageOrientation = "Page orientation to use. Possible values: L, P"
 	usageTabSpacing  = "Number of spaces used to replace tabstops."
 	usageDirMode     = "Optional. If set \"inputFile\" and \"outpuFile\" will be treated as directories. txt-to-pdf will try to parse every single file in \"inputFile\""
+	usageVerboseMode = "Optional."
 )
 
 type errorMessage string
@@ -57,6 +60,7 @@ func defineFlags() {
 	flag.StringVar(&orientation, "po", defaultOrientation, usageOrientation)
 	flag.IntVar(&tabSpacing, "ts", defaultTabSpacing, usageTabSpacing)
 	flag.BoolVar(&dirMode, "dir", defaultDirMode, usageDirMode)
+	flag.BoolVar(&verboseMode, "verb", defaultVerboseMode, usageVerboseMode)
 	flag.Parse()
 }
 
@@ -93,16 +97,22 @@ func flagsOkay() error {
 }
 
 func createPdfFile(outputFilePath string, input string) error {
+	dbg("createPdfFile", "creating "+outputFilePath)
+	defer dbg("createPdfFile", "done "+outputFilePath)
+
 	pdf := gofpdf.New(orientation, "pt", pageSize, "")
 	tr := pdf.UnicodeTranslatorFromDescriptor("")
 	pdf.AddPage()
 	pdf.SetFont("courier", "", float64(fontSize))
+	//TODO: this is freaking slow.
 	pdf.MultiCell(0, float64(fontSize), tr(input), "", "", false)
 
 	return pdf.OutputFileAndClose(outputFilePath)
 }
 
 func createPdfFromFile(inputFilePath string, outputFilePath string) error {
+	dbg("createPdfFromFile", "converting "+inputFilePath)
+	defer dbg("createPdfFromFile", "done "+inputFilePath)
 	fi, err := os.Open(inputFilePath)
 	defer fi.Close()
 	if err == nil {
@@ -121,6 +131,11 @@ type inOutFilePair struct {
 }
 
 func ceatePdfFromFolder(inputPath string, outputPath string) error {
+	//TODO: make sure both input and output path are really treated as folders
+	//txt-to-pdf -dir -if "inputFile" -o /tmp/folder/someOtherFolder
+	// -> output is treated as part of the filename
+	dbg("createPdfFromFolder", "converting files in "+inputPath)
+	defer dbg("createPdfFromFolder", "done")
 	dir, err := os.Open(inputPath)
 	defer dir.Close()
 	if err == nil {
@@ -129,7 +144,7 @@ func ceatePdfFromFolder(inputPath string, outputPath string) error {
 			if info.IsDir() {
 				files, _ := dir.Readdir(0)
 				c := make(chan inOutFilePair, 10)
-				//channel for gathering error messages
+				//channel for gathering error messages. A bit messy.
 				ce := make(chan string, runtime.GOMAXPROCS(0))
 				var wg sync.WaitGroup
 				//limit max goroutines to GOMAXPROCS
@@ -143,6 +158,7 @@ func ceatePdfFromFolder(inputPath string, outputPath string) error {
 								in:  inputPath + s.Name(),
 								out: parseFileName(outputPath + s.Name()),
 							}
+							dbg("createPdfFromFolder", "adding to channel: "+filePair.in)
 							c <- filePair
 						}
 					}
@@ -192,7 +208,7 @@ func createPdfFromStdin() error {
 
 func parseInput(r io.Reader) (string, error) {
 	//read from r replacing '/t' with spaces
-	cap := 512
+	cap := 1024
 	buf := make([]byte, cap)
 	var b strings.Builder
 	b.Grow(cap)
@@ -209,7 +225,6 @@ func parseInput(r io.Reader) (string, error) {
 				}
 			}
 		}
-
 	}
 	if err == io.EOF {
 		return b.String(), nil
@@ -256,5 +271,11 @@ func main() {
 		//read from stdin
 		fmt.Println("Error creating pdf file!", err)
 		os.Exit(1)
+	}
+}
+
+func dbg(function string, message string) {
+	if verboseMode {
+		fmt.Printf("%s: %s\n", function, message)
 	}
 }
