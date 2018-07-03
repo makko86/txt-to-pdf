@@ -7,6 +7,7 @@ import (
 	"io/ioutil"
 	"os"
 	"path"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"sync"
@@ -154,70 +155,88 @@ type inOutFilePair struct {
 
 func ceatePdfFromFolder(inputPath string, outputPath string) error {
 	//TODO: make sure both input and output path are really treated as folders
-	//txt-to-pdf -dir -if "inputFile" -o /tmp/folder/someOtherFolder
+	//txt-to-pdf -dir -if "inputFile" -of /tmp/folder/someOtherFolder
 	// -> output is treated as part of the filename
 	dbg("createPdfFromFolder", "converting files in "+inputPath)
 	defer dbg("createPdfFromFolder", "done")
-	dir, err := os.Open(inputPath)
-	defer dir.Close()
+	inDir, err := os.Open(inputPath)
+	defer inDir.Close()
+	if err != nil {
+		return err
+	}
+	outDir, err := os.Open(outputPath)
+	defer outDir.Close()
+	if err != nil {
+		return err
+	}
+
+	info, err := inDir.Stat()
 	if err == nil {
-		info, err := dir.Stat()
-		if err == nil {
-			if info.IsDir() {
-				files, _ := dir.Readdir(0)
-				c := make(chan inOutFilePair, 10)
-				//channel for gathering error messages. A bit messy.
-				ce := make(chan string, runtime.GOMAXPROCS(0))
-				var wg sync.WaitGroup
-				//limit max goroutines to GOMAXPROCS
-				wg.Add(runtime.GOMAXPROCS(0))
-
-				// populate channel with files
-				go func(c chan inOutFilePair) {
-					for _, s := range files {
-						if !s.IsDir() {
-							filePair := inOutFilePair{
-								in:  inputPath + s.Name(),
-								out: parseFileName(outputPath + s.Name()),
-							}
-							dbg("createPdfFromFolder", "adding to channel: "+filePair.in)
-							c <- filePair
-						}
-					}
-					close(c)
-				}(c)
-
-				for i := 0; i < runtime.GOMAXPROCS(0); i++ {
-					go func(c chan inOutFilePair, ce chan string, wg *sync.WaitGroup) {
-						defer wg.Done()
-						for {
-							filePair, ok := <-c
-							if !ok {
-								break
-							}
-							if err := createPdfFromFile(filePair.in, filePair.out); err != nil {
-								ce <- err.Error()
-								break
-							}
-						}
-					}(c, ce, &wg)
-				}
-				wg.Wait()
-				close(ce) //need to close the error channel
-				if len(ce) > 0 {
-					//Errors occured. What a mess...
-					var message string
-					for s := range ce {
-						message += s + " "
-					}
-					return errorMessage(message)
-				}
-				return nil
-			}
+		if !info.IsDir() {
 			return errorMessage(fmt.Sprintf("%s is not a directory!", inputPath))
 		}
+	} else {
+		return err
 	}
-	return err
+
+	info, err = outDir.Stat()
+	if err == nil {
+		if !info.IsDir() {
+			return errorMessage(fmt.Sprintf("%s is not a directory!", outputPath))
+		}
+	} else {
+		return err
+	}
+
+	files, _ := inDir.Readdir(0)
+	c := make(chan inOutFilePair, 10)
+	//channel for gathering error messages. A bit messy.
+	ce := make(chan string, runtime.GOMAXPROCS(0))
+	var wg sync.WaitGroup
+	//limit max goroutines to GOMAXPROCS
+	wg.Add(runtime.GOMAXPROCS(0))
+
+	// populate channel with files
+	go func(c chan inOutFilePair) {
+		for _, s := range files {
+			if !s.IsDir() {
+				filePair := inOutFilePair{
+					in:  filepath.Join(inputPath, s.Name()),
+					out: parseFileName(filepath.Join(outputPath, s.Name())),
+				}
+				dbg("createPdfFromFolder", "adding to channel: "+filePair.in)
+				c <- filePair
+			}
+		}
+		close(c)
+	}(c)
+
+	for i := 0; i < runtime.GOMAXPROCS(0); i++ {
+		go func(c chan inOutFilePair, ce chan string, wg *sync.WaitGroup) {
+			defer wg.Done()
+			for {
+				filePair, ok := <-c
+				if !ok {
+					break
+				}
+				if err := createPdfFromFile(filePair.in, filePair.out); err != nil {
+					ce <- err.Error()
+					break
+				}
+			}
+		}(c, ce, &wg)
+	}
+	wg.Wait()
+	close(ce) //need to close the error channel
+	if len(ce) > 0 {
+		//Errors occured. What a mess...
+		var message string
+		for s := range ce {
+			message += s + "\n"
+		}
+		return errorMessage(message)
+	}
+	return nil
 }
 
 func createPdfFromStdin() error {
