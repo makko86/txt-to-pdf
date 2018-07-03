@@ -4,6 +4,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"io/ioutil"
 	"os"
 	"path"
 	"runtime"
@@ -105,7 +106,8 @@ func createPdfFile(outputFilePath string, input string) error {
 	pdf.AddPage()
 	pdf.SetFont("courier", "", float64(fontSize))
 	//TODO: this is freaking slow.
-	pdf.MultiCell(0, float64(fontSize), tr(input), "", "", false)
+	//pdf.MultiCell(0, float64(fontSize), tr(input), "", "", false)
+	pdf.Write(float64(fontSize), tr(input))
 
 	return pdf.OutputFileAndClose(outputFilePath)
 }
@@ -208,26 +210,14 @@ func createPdfFromStdin() error {
 
 func parseInput(r io.Reader) (string, error) {
 	//read from r replacing '/t' with spaces
-	cap := 1024
-	buf := make([]byte, cap)
-	var b strings.Builder
-	b.Grow(cap)
-	var n int
-	var err error
-	for err == nil {
-		n, err = r.Read(buf)
-		for i := 0; i < n; i++ {
-			if buf[i] != '\t' {
-				b.WriteByte(buf[i])
-			} else {
-				for j := 0; j < tabSpacing; j++ {
-					b.WriteByte(' ')
-				}
-			}
-		}
+	spaces := make([]byte, tabSpacing)
+	for i := 0; i < tabSpacing; i++ {
+		spaces[i] = ' '
 	}
-	if err == io.EOF {
-		return b.String(), nil
+	var err error
+	if input, err := ioutil.ReadAll(r); err == nil {
+		output := strings.Replace(string(input), string('\t'), string(spaces), -1)
+		return output, nil
 	}
 	return "", err
 }
