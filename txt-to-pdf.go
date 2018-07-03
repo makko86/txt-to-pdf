@@ -22,6 +22,7 @@ var orientation string
 var tabSpacing int
 var dirMode bool
 var verboseMode bool
+var lineCount int
 
 //Flag-defaults
 const (
@@ -33,6 +34,7 @@ const (
 	defaultTabSpacing  = 8
 	defaultDirMode     = false
 	defaultVerboseMode = false
+	defaultLineCount   = 0
 )
 
 //Flag usages
@@ -45,6 +47,7 @@ const (
 	usageTabSpacing  = "Number of spaces used to replace tabstops."
 	usageDirMode     = "Optional. If set \"inputFile\" and \"outpuFile\" will be treated as directories. txt-to-pdf will try to parse every single file in \"inputFile\""
 	usageVerboseMode = "Optional."
+	usageLineCount   = "Optional. If set a pagebreak will be inserted every n-pages."
 )
 
 type errorMessage string
@@ -62,6 +65,7 @@ func defineFlags() {
 	flag.IntVar(&tabSpacing, "ts", defaultTabSpacing, usageTabSpacing)
 	flag.BoolVar(&dirMode, "dir", defaultDirMode, usageDirMode)
 	flag.BoolVar(&verboseMode, "verb", defaultVerboseMode, usageVerboseMode)
+	flag.IntVar(&lineCount, "lc", defaultLineCount, usageLineCount)
 	flag.Parse()
 }
 
@@ -105,9 +109,25 @@ func createPdfFile(outputFilePath string, input string) error {
 	tr := pdf.UnicodeTranslatorFromDescriptor("")
 	pdf.AddPage()
 	pdf.SetFont("courier", "", float64(fontSize))
-	//TODO: this is freaking slow.
-	//pdf.MultiCell(0, float64(fontSize), tr(input), "", "", false)
-	pdf.Write(float64(fontSize), tr(input))
+
+	//try creating the file line by line -> faster than just using pdf.Write(), etc...
+	j := 0
+	lc := 1
+	for i, v := range input {
+		if v == '\n' {
+			//dbg("createPdfile", fmt.Sprintf("i: %d, j: %d", i, j))
+			if j < i {
+				pdf.Write(float64(fontSize), tr(input[j:i]))
+			}
+			pdf.Ln(float64(fontSize))
+			if lc == lineCount {
+				pdf.AddPage()
+				lc = 1
+			}
+			lc++
+			j = i + 1
+		}
+	}
 
 	return pdf.OutputFileAndClose(outputFilePath)
 }
@@ -208,8 +228,9 @@ func createPdfFromStdin() error {
 	return err
 }
 
+//read from r replacing '\t' with spaces
+//remove any '\r'
 func parseInput(r io.Reader) (string, error) {
-	//read from r replacing '/t' with spaces
 	spaces := make([]byte, tabSpacing)
 	for i := 0; i < tabSpacing; i++ {
 		spaces[i] = ' '
@@ -217,6 +238,8 @@ func parseInput(r io.Reader) (string, error) {
 	var err error
 	if input, err := ioutil.ReadAll(r); err == nil {
 		output := strings.Replace(string(input), string('\t'), string(spaces), -1)
+		output = strings.Replace(output, string('\r'), "", -1)
+		output = strings.Replace(output, "%", "%%", -1)
 		return output, nil
 	}
 	return "", err
