@@ -7,6 +7,7 @@ import (
 	"io/ioutil"
 	"os"
 	"path"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"sync"
@@ -22,6 +23,7 @@ var orientation string
 var tabSpacing int
 var dirMode bool
 var verboseMode bool
+var lineCount int
 
 //Flag-defaults
 const (
@@ -33,6 +35,7 @@ const (
 	defaultTabSpacing  = 8
 	defaultDirMode     = false
 	defaultVerboseMode = false
+	defaultLineCount   = 0
 )
 
 //Flag usages
@@ -45,6 +48,7 @@ const (
 	usageTabSpacing  = "Number of spaces used to replace tabstops."
 	usageDirMode     = "Optional. If set \"inputFile\" and \"outpuFile\" will be treated as directories. txt-to-pdf will try to parse every single file in \"inputFile\""
 	usageVerboseMode = "Optional."
+	usageLineCount   = "Optional. If set a pagebreak will be inserted every n-pages."
 )
 
 type errorMessage string
@@ -62,9 +66,11 @@ func defineFlags() {
 	flag.IntVar(&tabSpacing, "ts", defaultTabSpacing, usageTabSpacing)
 	flag.BoolVar(&dirMode, "dir", defaultDirMode, usageDirMode)
 	flag.BoolVar(&verboseMode, "verb", defaultVerboseMode, usageVerboseMode)
+	flag.IntVar(&lineCount, "lc", defaultLineCount, usageLineCount)
 	flag.Parse()
 }
 
+//Check if the commandline arguments have the correct values etc.
 func flagsOkay() error {
 	if inputFile == "" && outputFile == "" {
 		return errorMessage("No input or output specified")
@@ -97,6 +103,8 @@ func flagsOkay() error {
 	return nil
 }
 
+//creates the pdf file at "outputFilePath" with "input" as the content
+//linebreaks will be inserted here not inside the gofpdf functions
 func createPdfFile(outputFilePath string, input string) error {
 	dbg("createPdfFile", "creating "+outputFilePath)
 	defer dbg("createPdfFile", "done "+outputFilePath)
@@ -105,9 +113,25 @@ func createPdfFile(outputFilePath string, input string) error {
 	tr := pdf.UnicodeTranslatorFromDescriptor("")
 	pdf.AddPage()
 	pdf.SetFont("courier", "", float64(fontSize))
-	//TODO: this is freaking slow.
-	//pdf.MultiCell(0, float64(fontSize), tr(input), "", "", false)
-	pdf.Write(float64(fontSize), tr(input))
+
+	//try creating the file line by line -> faster than just using pdf.Write(), etc...
+	j := 0
+	lc := 1
+	for i, v := range input {
+		if v == '\n' {
+			//dbg("createPdfile", fmt.Sprintf("i: %d, j: %d", i, j))
+			if j < i {
+				pdf.Write(float64(fontSize), tr(input[j:i]))
+			}
+			pdf.Ln(float64(fontSize))
+			if lc == lineCount {
+				pdf.AddPage()
+				lc = 1
+			}
+			lc++
+			j = i + 1
+		}
+	}
 
 	return pdf.OutputFileAndClose(outputFilePath)
 }
@@ -132,72 +156,88 @@ type inOutFilePair struct {
 	out string
 }
 
+//checks if input and output folders exist, and concurrently creates the output pdf files
 func ceatePdfFromFolder(inputPath string, outputPath string) error {
-	//TODO: make sure both input and output path are really treated as folders
-	//txt-to-pdf -dir -if "inputFile" -o /tmp/folder/someOtherFolder
-	// -> output is treated as part of the filename
 	dbg("createPdfFromFolder", "converting files in "+inputPath)
 	defer dbg("createPdfFromFolder", "done")
-	dir, err := os.Open(inputPath)
-	defer dir.Close()
+	inDir, err := os.Open(inputPath)
+	defer inDir.Close()
+	if err != nil {
+		return err
+	}
+	outDir, err := os.Open(outputPath)
+	defer outDir.Close()
+	if err != nil {
+		return err
+	}
+
+	info, err := inDir.Stat()
 	if err == nil {
-		info, err := dir.Stat()
-		if err == nil {
-			if info.IsDir() {
-				files, _ := dir.Readdir(0)
-				c := make(chan inOutFilePair, 10)
-				//channel for gathering error messages. A bit messy.
-				ce := make(chan string, runtime.GOMAXPROCS(0))
-				var wg sync.WaitGroup
-				//limit max goroutines to GOMAXPROCS
-				wg.Add(runtime.GOMAXPROCS(0))
-
-				// populate channel with files
-				go func(c chan inOutFilePair) {
-					for _, s := range files {
-						if !s.IsDir() {
-							filePair := inOutFilePair{
-								in:  inputPath + s.Name(),
-								out: parseFileName(outputPath + s.Name()),
-							}
-							dbg("createPdfFromFolder", "adding to channel: "+filePair.in)
-							c <- filePair
-						}
-					}
-					close(c)
-				}(c)
-
-				for i := 0; i < runtime.GOMAXPROCS(0); i++ {
-					go func(c chan inOutFilePair, ce chan string, wg *sync.WaitGroup) {
-						defer wg.Done()
-						for {
-							filePair, ok := <-c
-							if !ok {
-								break
-							}
-							if err := createPdfFromFile(filePair.in, filePair.out); err != nil {
-								ce <- err.Error()
-								break
-							}
-						}
-					}(c, ce, &wg)
-				}
-				wg.Wait()
-				close(ce) //need to close the error channel
-				if len(ce) > 0 {
-					//Errors occured. What a mess...
-					var message string
-					for s := range ce {
-						message += s + " "
-					}
-					return errorMessage(message)
-				}
-				return nil
-			}
+		if !info.IsDir() {
 			return errorMessage(fmt.Sprintf("%s is not a directory!", inputPath))
 		}
+	} else {
+		return err
 	}
-	return err
+
+	info, err = outDir.Stat()
+	if err == nil {
+		if !info.IsDir() {
+			return errorMessage(fmt.Sprintf("%s is not a directory!", outputPath))
+		}
+	} else {
+		return err
+	}
+
+	files, _ := inDir.Readdir(0)
+	c := make(chan inOutFilePair, 10)
+	//channel for gathering error messages. A bit messy.
+	ce := make(chan string, runtime.GOMAXPROCS(0))
+	var wg sync.WaitGroup
+	//limit max goroutines to GOMAXPROCS
+	wg.Add(runtime.GOMAXPROCS(0))
+
+	// populate channel with files
+	go func(c chan inOutFilePair) {
+		for _, s := range files {
+			if !s.IsDir() {
+				filePair := inOutFilePair{
+					in:  filepath.Join(inputPath, s.Name()),
+					out: parseFileName(filepath.Join(outputPath, s.Name())),
+				}
+				dbg("createPdfFromFolder", "adding to channel: "+filePair.in)
+				c <- filePair
+			}
+		}
+		close(c)
+	}(c)
+	//create n files at the same time
+	for i := 0; i < runtime.GOMAXPROCS(0); i++ {
+		go func(c chan inOutFilePair, ce chan string, wg *sync.WaitGroup) {
+			defer wg.Done()
+			for {
+				filePair, ok := <-c
+				if !ok {
+					break
+				}
+				if err := createPdfFromFile(filePair.in, filePair.out); err != nil {
+					ce <- err.Error()
+					break
+				}
+			}
+		}(c, ce, &wg)
+	}
+	wg.Wait()
+	close(ce) //need to close the error channel
+	if len(ce) > 0 {
+		//Errors occured. What a mess...
+		var message string
+		for s := range ce {
+			message += s + "\n"
+		}
+		return errorMessage(message)
+	}
+	return nil
 }
 
 func createPdfFromStdin() error {
@@ -208,8 +248,9 @@ func createPdfFromStdin() error {
 	return err
 }
 
+//read from r replacing '\t' with spaces
+//remove any '\r'
 func parseInput(r io.Reader) (string, error) {
-	//read from r replacing '/t' with spaces
 	spaces := make([]byte, tabSpacing)
 	for i := 0; i < tabSpacing; i++ {
 		spaces[i] = ' '
@@ -217,11 +258,14 @@ func parseInput(r io.Reader) (string, error) {
 	var err error
 	if input, err := ioutil.ReadAll(r); err == nil {
 		output := strings.Replace(string(input), string('\t'), string(spaces), -1)
+		output = strings.Replace(output, string('\r'), "", -1)
+		output = strings.Replace(output, "%", "%%", -1)
 		return output, nil
 	}
 	return "", err
 }
 
+//remove any existing file extension and add ".pdf"
 func parseFileName(file string) string {
 	if suffix := path.Ext(file); suffix != "" {
 		return strings.TrimSuffix(file, suffix) + ".pdf"
