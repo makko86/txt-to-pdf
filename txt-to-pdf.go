@@ -70,6 +70,7 @@ func defineFlags() {
 	flag.Parse()
 }
 
+//Check if the commandline arguments have the correct values etc.
 func flagsOkay() error {
 	if inputFile == "" && outputFile == "" {
 		return errorMessage("No input or output specified")
@@ -102,6 +103,8 @@ func flagsOkay() error {
 	return nil
 }
 
+//creates the pdf file at "outputFilePath" with "input" as the content
+//linebreaks will be inserted here not inside the gofpdf functions
 func createPdfFile(outputFilePath string, input string) error {
 	dbg("createPdfFile", "creating "+outputFilePath)
 	defer dbg("createPdfFile", "done "+outputFilePath)
@@ -153,10 +156,8 @@ type inOutFilePair struct {
 	out string
 }
 
+//checks if input and output folders exist, and concurrently creates the output pdf files
 func ceatePdfFromFolder(inputPath string, outputPath string) error {
-	//TODO: make sure both input and output path are really treated as folders
-	//txt-to-pdf -dir -if "inputFile" -of /tmp/folder/someOtherFolder
-	// -> output is treated as part of the filename
 	dbg("createPdfFromFolder", "converting files in "+inputPath)
 	defer dbg("createPdfFromFolder", "done")
 	inDir, err := os.Open(inputPath)
@@ -210,7 +211,7 @@ func ceatePdfFromFolder(inputPath string, outputPath string) error {
 		}
 		close(c)
 	}(c)
-
+	//create n files at the same time
 	for i := 0; i < runtime.GOMAXPROCS(0); i++ {
 		go func(c chan inOutFilePair, ce chan string, wg *sync.WaitGroup) {
 			defer wg.Done()
@@ -264,6 +265,7 @@ func parseInput(r io.Reader) (string, error) {
 	return "", err
 }
 
+//remove any existing file extension and add ".pdf"
 func parseFileName(file string) string {
 	if suffix := path.Ext(file); suffix != "" {
 		return strings.TrimSuffix(file, suffix) + ".pdf"
