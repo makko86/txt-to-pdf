@@ -111,6 +111,7 @@ func createPdfFile(outputFilePath string, input string) error {
 
 	pdf := gofpdf.New(orientation, "pt", pageSize, "")
 	tr := pdf.UnicodeTranslatorFromDescriptor("")
+	lineHeight := float64(fontSize) * 1.1
 	pdf.AddPage()
 	pdf.SetFont("courier", "", float64(fontSize))
 
@@ -121,9 +122,9 @@ func createPdfFile(outputFilePath string, input string) error {
 		if v == '\n' {
 			//dbg("createPdfile", fmt.Sprintf("i: %d, j: %d", i, j))
 			if j < i {
-				pdf.Write(float64(fontSize), tr(input[j:i]))
+				pdf.Write(lineHeight, tr(input[j:i]))
 			}
-			pdf.Ln(float64(fontSize))
+			pdf.Ln(lineHeight)
 			if lc == lineCount {
 				pdf.AddPage()
 				lc = 1
