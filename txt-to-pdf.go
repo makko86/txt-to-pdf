@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"io/ioutil"
+	"log"
 	"os"
 	"path"
 	"path/filepath"
@@ -290,8 +291,7 @@ func main() {
 			outputFile = inputFile
 		}
 		if err := ceatePdfFromFolder(inputFile, outputFile); err != nil {
-			fmt.Println("Error creating pdf file(s)!", err)
-			os.Exit(1)
+			log.Fatalf("Error creating pdf file(s)! %d", err)
 		}
 	} else if inputFile != "" {
 		//read from inputfile
@@ -299,18 +299,17 @@ func main() {
 			outputFile = parseFileName(inputFile)
 		}
 		if err := createPdfFromFile(inputFile, outputFile); err != nil {
-			fmt.Println("Error creating pdf file!", err)
-			os.Exit(1)
+			log.Fatalf("Error creating pdf file! %d", err)
 		}
 	} else if err := createPdfFromStdin(); err != nil {
 		//read from stdin
-		fmt.Println("Error creating pdf file!", err)
-		os.Exit(1)
+		log.Fatalf("Error creating pdf file! %d", err)
 	}
 }
 
 func dbg(function string, message string) {
 	if verboseMode {
 		fmt.Printf("%s: %s\n", function, message)
+
 	}
 }
